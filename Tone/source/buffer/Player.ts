@@ -31,7 +31,6 @@ export interface PlayerOptions extends SourceOptions {
  * @category Source
  */
 export class Player extends Source<PlayerOptions> {
-
 	readonly name: string = "Player";
 
 	/**
@@ -86,12 +85,22 @@ export class Player extends Source<PlayerOptions> {
 	 * @param url Either the AudioBuffer or the url from which to load the AudioBuffer
 	 * @param onload The function to invoke when the buffer is loaded.
 	 */
-	constructor(url?: string | AudioBuffer | ToneAudioBuffer, onload?: () => void);
+	constructor(
+		url?: string | AudioBuffer | ToneAudioBuffer,
+		onload?: () => void
+	);
 	constructor(options?: Partial<PlayerOptions>);
 	constructor() {
-
-		super(optionsFromArguments(Player.getDefaults(), arguments, ["url", "onload"]));
-		const options = optionsFromArguments(Player.getDefaults(), arguments, ["url", "onload"]);
+		super(
+			optionsFromArguments(Player.getDefaults(), arguments, [
+				"url",
+				"onload",
+			])
+		);
+		const options = optionsFromArguments(Player.getDefaults(), arguments, [
+			"url",
+			"onload",
+		]);
 
 		this._buffer = new ToneAudioBuffer({
 			onload: this._onload.bind(this, options.onload),
@@ -157,12 +166,91 @@ export class Player extends Source<PlayerOptions> {
 
 		// delete the source from the active sources
 		this._activeSources.delete(source);
-		if (this._activeSources.size === 0 && !this._synced &&
-			this._state.getValueAtTime(this.now()) === "started") {
+		if (
+			this._activeSources.size === 0 &&
+			!this._synced &&
+			this._state.getValueAtTime(this.now()) === "started"
+		) {
 			// remove the 'implicitEnd' event and replace with an explicit end
 			this._state.cancel(this.now());
 			this._state.setStateAtTime("stopped", this.now());
 		}
+	}
+
+	/** sync override */
+	sync(): this {
+		if (!this._synced) {
+			this._synced = true;
+			this._syncedStart = (time, offset) => {
+				offset *= this._playbackRate;
+				if (offset > 0) {
+					// get the playback state at that time
+					const stateEvent = this._state.get(offset);
+					// listen for start events which may occur in the middle of the sync'ed time
+					if (
+						stateEvent &&
+						stateEvent.state === "started" &&
+						stateEvent.time !== offset
+					) {
+						// get the offset
+						const startOffset =
+							offset - this.toSeconds(stateEvent.time);
+						let duration: number | undefined;
+						if (stateEvent.duration) {
+							duration =
+								this.toSeconds(stateEvent.duration) -
+								startOffset;
+							duration *= 4;
+						}
+
+						this._start(
+							time,
+							this.toSeconds(stateEvent.offset) + startOffset,
+							duration
+						);
+					}
+				}
+			};
+			this._syncedStop = (time) => {
+				let seconds = this.context.transport.getSecondsAtTime(
+					Math.max(time - this.sampleTime, 0)
+				);
+
+				seconds *= this._playbackRate;
+
+				this._stop(time + seconds - seconds);
+
+				/**
+				const valueAtTime = this._state.getValueAtTime(seconds);
+
+				const stateAtTime = this._state.get(seconds);
+
+				console.log(
+					valueAtTime,
+					stateAtTime,
+					seconds,
+					this._playbackRate
+				);
+
+				const startTime = stateAtTime?.time;
+				const duration = stateAtTime?.duration;
+
+				if (startTime && duration) {
+					if (startTime <= seconds && seconds <= startTime + 10) {
+						this._stop(time);
+					}
+				} else if (valueAtTime === "started") {
+					this._stop(time);
+				}
+				 */
+			};
+			this.context.transport.on("start", this._syncedStart);
+			this.context.transport.on("loopStart", this._syncedStart);
+			this.context.transport.on("stop", this._syncedStop);
+			this.context.transport.on("pause", this._syncedStop);
+			this.context.transport.on("loopEnd", this._syncedStop);
+		}
+		return this;
 	}
 
 	/**
@@ -196,7 +284,10 @@ export class Player extends Source<PlayerOptions> {
 
 		// compute the duration which is either the passed in duration of the buffer.duration - offset
 		const origDuration = duration;
-		duration = defaultArg(duration, Math.max(this._buffer.duration - computedOffset, 0));
+		duration = defaultArg(
+			duration,
+			Math.max(this._buffer.duration - computedOffset, 0)
+		);
 		let computedDuration = this.toSeconds(duration);
 
 		// scale it by the playback rate
@@ -223,9 +314,13 @@ export class Player extends Source<PlayerOptions> {
 			// cancel the previous stop
 			this._state.cancel(startTime + computedDuration);
 			// if it's not looping, set the state change at the end of the sample
-			this._state.setStateAtTime("stopped", startTime + computedDuration, {
-				implicitEnd: true,
-			});
+			this._state.setStateAtTime(
+				"stopped",
+				startTime + computedDuration,
+				{
+					implicitEnd: true,
+				}
+			);
 		}
 
 		// add it to the array of active sources
@@ -236,7 +331,11 @@ export class Player extends Source<PlayerOptions> {
 			source.start(startTime, computedOffset);
 		} else {
 			// subtract the fade out time
-			source.start(startTime, computedOffset, computedDuration - this.toSeconds(this.fadeOut));
+			source.start(
+				startTime,
+				computedOffset,
+				computedDuration - this.toSeconds(this.fadeOut)
+			);
 		}
 	}
 
@@ -245,14 +344,14 @@ export class Player extends Source<PlayerOptions> {
 	 */
 	protected _stop(time?: Time): void {
 		const computedTime = this.toSeconds(time);
-		this._activeSources.forEach(source => source.stop(computedTime));
+		this._activeSources.forEach((source) => source.stop(computedTime));
 	}
 
 	/**
 	 * Stop and then restart the player from the beginning (or offset)
 	 * @param  time When the player should start.
 	 * @param  offset The offset from the beginning of the sample to start at.
-	 * @param  duration How long the sample should play. If no duration is given, 
+	 * @param  duration How long the sample should play. If no duration is given,
 	 * 					it will default to the full length of the sample (minus any offset)
 	 */
 	restart(time?: Seconds, offset?: Time, duration?: Time): this {
@@ -318,7 +417,7 @@ export class Player extends Source<PlayerOptions> {
 			assertRange(this.toSeconds(loopStart), 0, this.buffer.duration);
 		}
 		// get the current source
-		this._activeSources.forEach(source => {
+		this._activeSources.forEach((source) => {
 			source.loopStart = loopStart;
 		});
 	}
@@ -335,7 +434,7 @@ export class Player extends Source<PlayerOptions> {
 			assertRange(this.toSeconds(loopEnd), 0, this.buffer.duration);
 		}
 		// get the current source
-		this._activeSources.forEach(source => {
+		this._activeSources.forEach((source) => {
 			source.loopEnd = loopEnd;
 		});
 	}
@@ -367,7 +466,7 @@ export class Player extends Source<PlayerOptions> {
 		}
 		this._loop = loop;
 		// set the loop of all of the sources
-		this._activeSources.forEach(source => {
+		this._activeSources.forEach((source) => {
 			source.loop = loop;
 		});
 		if (loop) {
@@ -399,11 +498,11 @@ export class Player extends Source<PlayerOptions> {
 		const stopEvent = this._state.getNextState("stopped", now);
 		if (stopEvent && stopEvent.implicitEnd) {
 			this._state.cancel(stopEvent.time);
-			this._activeSources.forEach(source => source.cancelStop());
+			this._activeSources.forEach((source) => source.cancelStop());
 		}
 
 		// set all the sources
-		this._activeSources.forEach(source => {
+		this._activeSources.forEach((source) => {
 			source.playbackRate.setValueAtTime(rate, now);
 		});
 	}
@@ -432,7 +531,7 @@ export class Player extends Source<PlayerOptions> {
 	dispose(): this {
 		super.dispose();
 		// disconnect all of the players
-		this._activeSources.forEach(source => source.dispose());
+		this._activeSources.forEach((source) => source.dispose());
 		this._activeSources.clear();
 		this._buffer.dispose();
 		return this;
